@@ -254,6 +254,7 @@ class PINN(object):
                                 condition.data_weight*self._compute_norm(
                                     residuals))
                             single_loss.append(local_loss)
+
                     elif hasattr(condition, 'output_points'):
                         pts = condition.input_points.to(
                             dtype=self.dtype, device=self.device)

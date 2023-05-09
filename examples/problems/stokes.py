@@ -32,9 +32,9 @@ class Stokes(SpatialProblem):
         return output_.extract(['ux', 'uy']) - value
 
     conditions = {
-        'gamma_top': Condition(Span({'x': [-2, 2], 'y':  1}), wall),
-        'gamma_bot': Condition(Span({'x': [-2, 2], 'y': -1}), wall),
-        'gamma_out': Condition(Span({'x':  2, 'y': [-1, 1]}), outlet),
-        'gamma_in':  Condition(Span({'x': -2, 'y': [-1, 1]}), inlet),
-        'D': Condition(Span({'x': [-2, 2], 'y': [-1, 1]}), [momentum, continuity]),
+        'gamma_top': Condition(location=Span({'x': [-2, 2], 'y':  1}), function=wall),
+        'gamma_bot': Condition(location=Span({'x': [-2, 2], 'y': -1}), function=wall),
+        'gamma_out': Condition(location=Span({'x':  2, 'y': [-1, 1]}), function=outlet),
+        'gamma_in':  Condition(location=Span({'x': -2, 'y': [-1, 1]}), function=inlet),
+        'D': Condition(location=Span({'x': [-2, 2], 'y': [-1, 1]}), function=[momentum, continuity]),
     }
