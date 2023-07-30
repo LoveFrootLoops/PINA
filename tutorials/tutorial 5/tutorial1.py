@@ -4,7 +4,7 @@ from pina.operators import grad
 from pina.geometry import CartesianDomain
 from pina import Condition, PINN
 from pina.trainer import Trainer
-from pina.equation.equation import Equation
+from pina.equation.system_equation import SystemEquation
 from pina.plotter import Plotter
 
 # Define material
@@ -18,7 +18,6 @@ if p == 'plain_strain':  ### plain strain
 elif p == 'plain_stress':  ### plain stress
     lmbda = E * nu / (1 + nu) / (1 - nu)
     mu = E / (1 + nu) / 2
-
 
 def material(input_, output_):
     u_grad = grad(output_, input_)
@@ -51,7 +50,7 @@ def material(input_, output_):
 
 def equilibrium(input_, output_):
     _, _, _, _, _, _, Gex, Gey = material(input_, output_)
-    return torch.hstack([Gex, Gey])
+    return torch.stack([Gex, Gey], dim=1)
 
 
 class Mechanics(SpatialProblem):
@@ -61,23 +60,17 @@ class Mechanics(SpatialProblem):
     conditions = {
         'D': Condition(
             location=CartesianDomain({'x': [0, 1], 'y': [0, 1]}),
-            equation=Equation(equilibrium))
+            equation=SystemEquation([equilibrium]))
     }
-
 
 # make the problem
 bvp_problem = Mechanics()
-
 
 class HardMLP(torch.nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
 
         self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, 20),
-                                          torch.nn.Tanh(),
-                                          torch.nn.Linear(20, 20),
-                                          torch.nn.Tanh(),
-                                          torch.nn.Linear(20, 20),
                                           torch.nn.Tanh(),
                                           torch.nn.Linear(20, 20),
                                           torch.nn.Tanh(),
@@ -91,7 +84,6 @@ class HardMLP(torch.nn.Module):
         modified_output = torch.hstack([u1_hard, u2_hard])
         return modified_output
 
-
 model = HardMLP(len(bvp_problem.input_variables), len(bvp_problem.output_variables))
 bvp_problem.discretise_domain(50, 'grid', locations=['D'])
 
@@ -99,7 +91,9 @@ bvp_problem.discretise_domain(50, 'grid', locations=['D'])
 solver = PINN(problem=bvp_problem, model=model, optimizer=torch.optim.LBFGS)
 
 # train the model (ONLY CPU for now, all other devises in the official release)
-trainer = Trainer(solver=solver, kwargs={'max_epochs': 500, 'accelerator': 'cpu', 'deterministic': True})
+#logger = pl_loggers.TensorBoardLogger(name=f'ssl-{0.01}-{1}', save_dir='runs')
+
+trainer = Trainer(solver=solver, kwargs={'max_epochs': 1, 'accelerator': 'cpu', 'deterministic': True})
 trainer.train()
 
 # plotter
@@ -118,7 +112,6 @@ u2 = predicted_output.extract('u2')
 e11, e22, e12, s11, s22, s12, _, _ = material(pts, solver.forward(pts))
 
 import matplotlib.pyplot as plt
-
 cmap = 'jet'
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u1.detach().numpy(), cmap=cmap)
@@ -129,18 +122,5 @@ plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u2.de
 plt.colorbar()
 plt.savefig("results/u2")
 plt.figure()
-plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=s11.detach().numpy(), cmap=cmap)
-plt.colorbar()
-plt.savefig("results/s11")
-plt.figure()
-plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=s22.detach().numpy(), cmap=cmap)
-plt.colorbar()
-plt.savefig("results/s22")
-plt.figure()
-plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=s12.detach().numpy(), cmap=cmap)
-plt.colorbar()
-plt.savefig("results/s12")
-plt.figure()
 plt.plot(solver.loss_list)
-plt.yscale('log')
 plt.savefig("results/loss")

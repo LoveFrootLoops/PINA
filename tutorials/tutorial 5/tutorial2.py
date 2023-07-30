@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+
 from pina.problem import SpatialProblem
 from pina.operators import grad
 from pina.geometry import CartesianDomain
@@ -56,27 +58,27 @@ def material(input_, output_):
 
 def equilibrium(input_, output_):
     _, _, _, _, _, _, Gex, Gey = material(input_, output_)
-    return torch.hstack([Gex, Gey])
+    return torch.stack([Gex, Gey], dim=1).squeeze()
 
 
 def gamma_left(input_, output_):
     _, _, _, _, s11, s12, _, _ = material(input_, output_)
-    return torch.hstack([s11, s12])
+    return torch.stack([s11, s12], dim=1).squeeze()
 
 
 def gamma_right(input_, output_):
     _, _, _, s11, _, s12, _, _ = material(input_, output_)
-    return torch.hstack([s11 - torch.cos(torch.pi * input_.extract(['y']) / 2), s12])
+    return torch.stack([s11 -torch.cos(torch.pi * input_.extract(['y']) / 2), s12], dim=1).squeeze()
 
 
 def gamma_bottom(input_, output_):
     _, _, _, _, s22, s12, _, _ = material(input_, output_)
-    return torch.hstack([s22, s12])
+    return torch.stack([s22, s12], dim=1).squeeze()
 
 
 def gamma_top(input_, output_):
     _, _, _, _, s22, s12, _, _ = material(input_, output_)
-    return torch.hstack([s22, s12])
+    return torch.stack([s22, s12], dim=1).squeeze()
 
 
 class Mechanics(SpatialProblem):
@@ -98,10 +100,8 @@ class Mechanics(SpatialProblem):
             equation=Equation(gamma_top)),
         'D': Condition(
             location=CartesianDomain({'x': [0, 1], 'y': [0, 1]}),
-            equation=Equation(equilibrium),
-            data_weight=0.5)
+            equation=SystemEquation([equilibrium]))
     }
-
 
 # make the problem
 bvp_problem = Mechanics()
@@ -112,10 +112,6 @@ class HardMLP(torch.nn.Module):
         super().__init__()
 
         self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, 20),
-                                          torch.nn.Tanh(),
-                                          torch.nn.Linear(20, 20),
-                                          torch.nn.Tanh(),
-                                          torch.nn.Linear(20, 20),
                                           torch.nn.Tanh(),
                                           torch.nn.Linear(20, 20),
                                           torch.nn.Tanh(),
@@ -138,49 +134,29 @@ bvp_problem.discretise_domain(20, 'grid', locations=['D'])
 solver = PINN(problem=bvp_problem, model=model, optimizer=torch.optim.LBFGS)
 
 # train the model (ONLY CPU for now, all other devises in the official release)
-trainer = Trainer(solver=solver, kwargs={'max_epochs': 3000, 'accelerator': 'cpu', 'deterministic': True})
+trainer = Trainer(solver=solver, kwargs={'max_epochs': 5, 'accelerator': 'cpu', 'deterministic': True})
 trainer.train()
 
 # plotter
 plotter = Plotter()
 plotter.plot(solver=solver, components='u1')
-plotter.plot(solver=solver, components='u2')
+plotter.plot(solver=solver, components='u1')
 
 # get components ui on pts
 v = [var for var in solver.problem.input_variables]
 pts = solver.problem.domain.sample(256, 'grid', variables=v)
-pts.requires_grad = True
 predicted_output = solver.forward(pts)
 u1 = predicted_output.extract('u1')
 u2 = predicted_output.extract('u2')
 
 import matplotlib.pyplot as plt
 
-e11, e22, e12, s11, s22, s12, _, _ = material(pts, solver.forward(pts))
-
 cmap = 'jet'
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u1.detach().numpy(), cmap=cmap)
 plt.colorbar()
-plt.savefig("results/u1")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/u1")
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u2.detach().numpy(), cmap=cmap)
 plt.colorbar()
-plt.savefig("results/u2")
-plt.figure()
-plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=s11.detach().numpy(), cmap=cmap)
-plt.colorbar()
-plt.savefig("results/s11")
-plt.figure()
-plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=s22.detach().numpy(), cmap=cmap)
-plt.colorbar()
-plt.savefig("results/s22")
-plt.figure()
-plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=s12.detach().numpy(), cmap=cmap)
-plt.colorbar()
-plt.savefig("results/s12")
-
-plt.figure()
-plt.plot(solver.loss_list)
-plt.yscale('log')
-plt.savefig("results/loss")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/u2")

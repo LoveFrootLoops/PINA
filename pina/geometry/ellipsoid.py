@@ -281,4 +281,4 @@ class EllipsoidDomain(Location):
         if mode in ['random']:
             return _Nd_sampler(n, mode, variables)
         else:
-            raise NotImplementedError(f'mode={mode} is not implemented.')
+            raise NotImplemented(f'mode={mode} is not implemented.')

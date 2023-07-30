@@ -11,14 +11,6 @@ from pina.equation.system_equation import SystemEquation
 from pina.plotter import Plotter
 from lightning.pytorch import seed_everything
 
-seed_everything(42, workers=True)
-
-size1, size2, size3 = 20, 20, 10
-tensor1, tensor2 = torch.rand(size1), torch.rand(size2)
-tensor3 = torch.linspace(0, 1, size3)
-inp_points = torch.cartesian_prod(tensor1, tensor2, tensor3)
-inp_points.requires_grad = True
-
 # Define material
 E = 7
 nu = 0.3
@@ -59,10 +51,6 @@ def material(input_, output_):
     Gex = (2 * mu + lmbda) * u1_xx + mu * u1_yy + mu * u2_xy + lmbda * u2_yx
     Gey = (2 * mu + lmbda) * u2_yy + mu * u2_xx + mu * u1_yx + lmbda * u1_xy
 
-    # sxx_x = lmbda * (u1_xx + u2_yx) + 2 * mu * u1_xx
-    # sxy_y = mu * (u1_yy + u2_xy)
-    # syy_y = lmbda * (u1_xy + u2_yy) + 2 * mu * u2_yy
-    # syx_x = mu * (u2_xx + u1_yx)
     return e11, e22, e12, s11, s22, s12, Gex, Gey
 
 
@@ -72,48 +60,48 @@ def equilibrium(input_, output_):
 
 
 def gamma_left(input_, output_):
-    _, _, _, _, s11, s12, _, _ = material(input_, output_)
-    return torch.stack([s11, s12], dim=1).squeeze()
+    _, _, _, s11, _, _, _, _ = material(input_, output_)
+    return s11
 
 
 def gamma_right(input_, output_):
-    _, _, _, s11, _, s12, _, _ = material(input_, output_)
-    t_ = input_.extract(['t'])
-    return torch.stack([s11 - t_*torch.cos(torch.pi * input_.extract(['y']) / 2), s12], dim=1).squeeze()
+    _, _, _, s11, _, _, _, _ = material(input_, output_)
+    return s11
 
 
 def gamma_bottom(input_, output_):
-    _, _, _, _, s22, s12, _, _ = material(input_, output_)
-    return torch.stack([s22, s12], dim=1).squeeze()
+    u1 = output_.extract(['u1'])
+    u2 = output_.extract(['u2'])
+    return torch.stack([u1, u2], dim=1).squeeze()
 
 
 def gamma_top(input_, output_):
-    _, _, _, _, s22, s12, _, _ = material(input_, output_)
-    return torch.stack([s22, s12], dim=1).squeeze()
+    u2 = output_.extract(['u2'])
+    return u2 - torch.sin(0.5 * torch.pi * input_.extract(['x']))*0.04
 
 
-class Mechanics(SpatialProblem, TimeDependentProblem):
+class Mechanics(SpatialProblem):
     output_variables = ['u1', 'u2']
-    spatial_domain = CartesianDomain({'x': [0, 1], 'y': [0, 1]})
-    temporal_domain = CartesianDomain({'t': [0, 1]})
+    spatial_domain = CartesianDomain({'x': [-1, 1], 'y': [-1, 1]})
 
     conditions = {
         'gamma_left': Condition(
-            location=CartesianDomain({'x': 0, 'y': [0, 1], 't': [0, 1]}),
+            location=CartesianDomain({'x': -1, 'y': [-1, 1]}),
             equation=Equation(gamma_left)),
         'gamma_right': Condition(
-            location=CartesianDomain({'x': 1, 'y': [0, 1], 't': [0, 1]}),
+            location=CartesianDomain({'x': 1, 'y': [-1, 1]}),
             equation=Equation(gamma_right)),
-        'gamma_bottom': Condition(
-            location=CartesianDomain({'x': [0, 1], 'y': 0, 't': [0, 1]}),
-            equation=Equation(gamma_bottom)),
+        # 'gamma_bottom': Condition(
+        #    location=CartesianDomain({'x':[-0.5, 0.5], 'y': -0.5}),
+        #    equation=Equation(gamma_bottom)),
         'gamma_top': Condition(
-            location=CartesianDomain({'x': [0, 1], 'y': 1, 't': [0, 1]}),
+            location=CartesianDomain({'x': [-1, 1], 'y': 1}),
             equation=Equation(gamma_top)),
         'D': Condition(
-            location=CartesianDomain({'x': [0, 1], 'y': [0, 1], 't': [0, 1]}),
+            location=CartesianDomain({'x': [-1, 1], 'y': [-1, 1]}),
             equation=SystemEquation([equilibrium]))
     }
+
 
 # make the problem
 bvp_problem = Mechanics()
@@ -123,23 +111,23 @@ class HardMLP(torch.nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
 
-        self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, 20),
+        self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, 16),
                                           torch.nn.Tanh(),
-                                          torch.nn.Linear(20, 20),
+                                          torch.nn.Linear(16, 16),
                                           torch.nn.Tanh(),
-                                          torch.nn.Linear(20, output_dim))
+                                          torch.nn.Linear(16, output_dim))
 
     # here in the foward we implement the hard constraints
     def forward(self, x):
         output = self.layers(x)
-        u1_hard = x.extract(['x']) * output[:, 0][:, None]
-        u2_hard = x.extract(['y']) * output[:, 1][:, None]
+        u1_hard = (1 - x.extract(['y'])) * (1 + x.extract(['y'])) * output[:, 0][:, None]
+        u2_hard = (1 + x.extract(['x'])) * (1 - x.extract(['x'])) * (1 + x.extract(['y'])) * output[:, 1][:, None]
         modified_output = torch.hstack([u1_hard, u2_hard])
         return modified_output
 
 
 model = HardMLP(len(bvp_problem.input_variables), len(bvp_problem.output_variables))
-bvp_problem.discretise_domain(10, 'grid', locations=['gamma_left', 'gamma_right', 'gamma_bottom', 'gamma_top'])
+bvp_problem.discretise_domain(10, 'grid', locations=['gamma_left', 'gamma_right', 'gamma_top'])
 bvp_problem.discretise_domain(20, 'grid', locations=['D'])
 
 # make the solver
@@ -151,10 +139,8 @@ trainer.train()
 
 # plotter
 plotter = Plotter()
-plotter.plot(solver=solver, components='u1', fixed_variables={'t': 0.0})
-plotter.plot(solver=solver, components='u1', fixed_variables={'t': 1.0})
-plotter.plot(solver=solver, components='u2', fixed_variables={'t': 0.0})
-plotter.plot(solver=solver, components='u2', fixed_variables={'t': 1.0})
+plotter.plot(solver=solver, components='u1')
+plotter.plot(solver=solver, components='u2')
 
 # get components ui on pts
 v = [var for var in solver.problem.input_variables]
@@ -169,8 +155,8 @@ cmap = 'jet'
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u1.detach().numpy(), cmap=cmap)
 plt.colorbar()
-plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/u1")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/u1")
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u2.detach().numpy(), cmap=cmap)
 plt.colorbar()
-plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/u2")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/u2")

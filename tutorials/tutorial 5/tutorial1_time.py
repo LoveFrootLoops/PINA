@@ -7,6 +7,13 @@ from pina.trainer import Trainer
 from pina.equation.system_equation import SystemEquation
 from pina.plotter import Plotter
 
+size1, size2, size3 = 20, 20, 10
+tensor1, tensor2 = torch.rand(size1), torch.rand(size2)
+tensor3 = torch.linspace(0, 1, size3)
+inp_points = torch.cartesian_prod(tensor1, tensor2, tensor3)
+inp_points.requires_grad = True
+print(inp_points)
+
 # Define material
 E = 7
 nu = 0.3
@@ -18,7 +25,6 @@ if p == 'plain_strain':  ### plain strain
 elif p == 'plain_stress':  ### plain stress
     lmbda = E * nu / (1 + nu) / (1 - nu)
     mu = E / (1 + nu) / 2
-
 
 def material(input_, output_):
     u_grad = grad(output_, input_)
@@ -51,7 +57,7 @@ def material(input_, output_):
 
 def equilibrium(input_, output_):
     _, _, _, _, _, _, Gex, Gey = material(input_, output_)
-    return torch.hstack([Gex, Gey])
+    return torch.stack([Gex, Gey], dim=1)
 
 
 class Mechanics(SpatialProblem, TimeDependentProblem):
@@ -60,45 +66,44 @@ class Mechanics(SpatialProblem, TimeDependentProblem):
     temporal_domain = CartesianDomain({'t': [0, 1]})
 
     conditions = {
-         'D': Condition(
-            location=CartesianDomain({'x': [0, 1], 'y': [0, 1], 't': [0, 1]}),
+        #'D': Condition(
+        #    location=CartesianDomain({'x': [0, 1], 'y': [0, 1], 't': [0, 1]}),
+        #    equation=SystemEquation([equilibrium]))
+        'D': Condition(
+            input_points=LabelTensor(inp_points, ['x', 'y', 't']),
             equation=SystemEquation([equilibrium]))
     }
 
-
 # make the problem
 bvp_problem = Mechanics()
-
 
 class HardMLP(torch.nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
 
         self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, 20),
-                                          torch.nn.Hardswish(),
+                                          torch.nn.Tanh(),
                                           torch.nn.Linear(20, 20),
-                                          torch.nn.Hardswish(),
+                                          torch.nn.Tanh(),
                                           torch.nn.Linear(20, output_dim))
 
     def forward(self, x):
         output = self.layers(x)
         delta = 0.05
-        u1_hard = x.extract(['t']) * delta * x.extract(['x']) + (1 - x.extract(['x'])) * x.extract(['x']) * output[:,
-                                                                                                            0][:, None]
+        u1_hard = x.extract(['t'])*delta * x.extract(['x']) + (1 - x.extract(['x'])) * x.extract(['x']) * output[:, 0][:, None]
         u2_hard = x.extract(['y']) * output[:, 1][:, None]
         modified_output = torch.hstack([u1_hard, u2_hard])
         return modified_output
 
-
 model = HardMLP(len(bvp_problem.input_variables), len(bvp_problem.output_variables))
-bvp_problem.discretise_domain(15, 'grid', locations=['D'], variables=['x', 'y'])
-bvp_problem.discretise_domain(2, 'grid', locations=['D'], variables=['t'])
+#bvp_problem.discretise_domain(15, 'grid', locations=['D'], variables=['x', 'y'])
+#bvp_problem.discretise_domain(2, 'grid', locations=['D'], variables=['t'])
 
 # make the solver
 solver = PINN(problem=bvp_problem, model=model, optimizer=torch.optim.LBFGS)
 
 # train the model (ONLY CPU for now, all other devises in the official release)
-trainer = Trainer(solver=solver, kwargs={'max_epochs': 5, 'accelerator': 'cpu', 'deterministic': True})
+trainer = Trainer(solver=solver, kwargs={'max_epochs': 5000, 'accelerator': 'cpu', 'deterministic': True})
 trainer.train()
 
 # plotter
@@ -111,7 +116,6 @@ plotter.plot(solver=solver, components='u2', fixed_variables={'t': 1.0})
 # get components ui on pts
 v = [var for var in solver.problem.input_variables]
 pts = solver.problem.domain.sample(256, 'grid', variables=v)
-pts.requires_grad(True)
 predicted_output = solver.forward(pts)
 u1 = predicted_output.extract('u1')
 u2 = predicted_output.extract('u2')
@@ -122,11 +126,13 @@ cmap = 'jet'
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u1.detach().numpy(), cmap=cmap)
 plt.colorbar()
-plt.savefig("results/u1")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/u1")
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u2.detach().numpy(), cmap=cmap)
 plt.colorbar()
-plt.savefig("results/u2")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/u2")
+
+
 plt.figure()
 plt.plot(solver.loss_list)
-plt.savefig("results/loss")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/loss")

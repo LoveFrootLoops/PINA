@@ -7,7 +7,7 @@ from pina.operators import grad
 from pina.geometry import CartesianDomain
 from pina import Condition, PINN
 from pina.trainer import Trainer
-from pina.equation.equation import Equation
+from pina.equation.system_equation import SystemEquation
 from pina.plotter import Plotter
 
 # Define material
@@ -52,8 +52,8 @@ def create_data(ndata):
     return data_eps, data_sig, data_sc
 
 
-data_eps, data_sig, data_sc = create_data(500)
-nlist = 10
+data_eps, data_sig, data_sc = create_data(5000000)
+nlist = 1000
 k = 6
 quantizer = faiss.IndexFlatL2(6)  # the other index
 index = faiss.IndexIVFFlat(quantizer, 6, nlist)
@@ -68,11 +68,13 @@ def equilibrium(input_, output_):
     output_grad = grad(output_, input_)
     Gex = output_grad.extract(['ds11dx']) + output_grad.extract(['ds12dy'])
     Gey = output_grad.extract(['ds12dx']) + output_grad.extract(['ds22dy'])
-    return torch.hstack([Gex, Gey])
+    return torch.stack([Gex, Gey], dim=1).squeeze()
 
 
 def distance(input_, output_):
     output_grad = grad(output_, input_)
+    Gex = output_grad.extract(['ds11dx']) + output_grad.extract(['ds12dy'])
+    Gey = output_grad.extract(['ds12dx']) + output_grad.extract(['ds22dy'])
     e11 = output_grad.extract(['du1dx'])
     e22 = output_grad.extract(['du2dy'])
     e12 = 0.5 * (output_grad.extract(['du1dy']) + output_grad.extract(['du2dx']))
@@ -82,7 +84,7 @@ def distance(input_, output_):
 
     eps = torch.stack((e11, e22, e12), dim=1).detach().clone().squeeze()
     sig = torch.stack((s11, s22, s12), dim=1).detach().clone().squeeze()
-    points = torch.cat([scale(Csqrt, eps), scale(Cisqrt, sig)], dim=1)
+    points = torch.stack((scale(Csqrt, eps), scale(Cisqrt, sig)), dim=1).reshape(len(e11), 6)
     _, indx = index.search(points.detach().numpy(), 1)
 
     eps_opt = data_eps[indx.squeeze()]
@@ -93,8 +95,9 @@ def distance(input_, output_):
     s11_opt = sig_opt[:, 0][:, None]
     s22_opt = sig_opt[:, 1][:, None]
     s12_opt = sig_opt[:, 2][:, None]
-    return torch.hstack(
-        [e11 - e11_opt, e22 - e22_opt, e12 - e12_opt, s11 - s11_opt, s22 - s22_opt, s12 - s12_opt])
+    return torch.stack(
+        [Gex, Gey, e11 - e11_opt, e22 - e22_opt, e12 - e12_opt, s11 - s11_opt, s22 - s22_opt, s12 - s12_opt],
+        dim=1).squeeze()
 
 
 class Mechanics(SpatialProblem):
@@ -102,14 +105,9 @@ class Mechanics(SpatialProblem):
     spatial_domain = CartesianDomain({'x': [0, 1], 'y': [0, 1]})
 
     conditions = {
-        'D_eq': Condition(
+        'D': Condition(
             location=CartesianDomain({'x': [0, 1], 'y': [0, 1]}),
-            equation=Equation(equilibrium),
-            data_weight=0.5),
-        'D_dist': Condition(
-            location=CartesianDomain({'x': [0, 1], 'y': [0, 1]}),
-            equation=Equation(distance),
-            data_weight=0.5)
+            equation=SystemEquation([distance]))
     }
 
 
@@ -141,7 +139,7 @@ class HardMLP(torch.nn.Module):
 
 
 model = HardMLP(len(bvp_problem.input_variables), len(bvp_problem.output_variables))
-bvp_problem.discretise_domain(50, 'grid', locations=['D_eq', 'D_dist'])
+bvp_problem.discretise_domain(50, 'grid', locations=['D'])
 
 # make the solver
 solver = PINN(problem=bvp_problem, model=model, optimizer=torch.optim.LBFGS)
@@ -168,8 +166,8 @@ cmap = 'jet'
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u1.detach().numpy(), cmap=cmap)
 plt.colorbar()
-plt.savefig("results/u1")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/u1")
 plt.figure()
 plt.scatter(pts.detach().numpy()[:, 0], pts.detach().numpy()[:, 1], s=5, c=u2.detach().numpy(), cmap=cmap)
 plt.colorbar()
-plt.savefig("results/u2")
+plt.savefig("C:/Users/Kerem/PycharmProjects/PINA/tutorials/tutorial 5/results/u2")

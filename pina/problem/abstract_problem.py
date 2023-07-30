@@ -24,7 +24,7 @@ class AbstractProblem(metaclass=ABCMeta):
 
         # put in self.input_pts all the points that we don't need to sample
         self._span_condition_points()
-      
+
     @property
     def input_variables(self):
         """
@@ -129,9 +129,9 @@ class AbstractProblem(metaclass=ABCMeta):
         :type locations: str, optional
 
         :Example:
-            >>> pinn.discretise_domain(n=10, mode='grid')
-            >>> pinn.discretise_domain(n=10, mode='grid', location=['bound1'])
-            >>> pinn.discretise_domain(n=10, mode='grid', variables=['x'])
+            >>> pinn.span_pts(n=10, mode='grid')
+            >>> pinn.span_pts(n=10, mode='grid', location=['bound1'])
+            >>> pinn.span_pts(n=10, mode='grid', variables=['x'])
 
         .. warning::
             ``random`` is currently the only implemented ``mode`` for all geometries, i.e.
@@ -148,17 +148,17 @@ class AbstractProblem(metaclass=ABCMeta):
         check_consistency(mode, str)
         if mode not in ['random', 'grid', 'lh', 'chebyshev', 'latin']:
             raise TypeError(f'mode {mode} not valid.')
-        
+
         # check consistency variables
         if variables == 'all':
             variables = self.input_variables
         else:
             check_consistency(variables, str)
-        
+
         if sorted(variables) !=  sorted(self.input_variables):
             TypeError(f'Wrong variables for sampling. Variables ',
                       f'should be in {self.input_variables}.')
-            
+
         # check consistency location
         if locations == 'all':
             locations = [condition for condition in self.conditions]
@@ -176,7 +176,7 @@ class AbstractProblem(metaclass=ABCMeta):
             # we try to check if we have already sampled
             try:
                 already_sampled = [self.input_pts[location]]
-            # if we have not sampled, a key error is thrown 
+            # if we have not sampled, a key error is thrown
             except KeyError:
                 already_sampled = []
 
@@ -196,9 +196,11 @@ class AbstractProblem(metaclass=ABCMeta):
                         ] + already_sampled
             pts = merge_tensors(samples)
             self.input_pts[location] = pts
-
+            # setting the grad
+            self.input_pts[location].requires_grad_(True)
+            self.input_pts[location].retain_grad()
             # the condition is sampled if input_pts contains all labels
-            if sorted(self.input_pts[location].labels) ==  sorted(self.input_variables): 
+            if sorted(self.input_pts[location].labels) ==  sorted(self.input_variables):
                 self._have_sampled_points[location] = True
 
     @property
